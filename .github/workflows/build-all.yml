@@ -1,8 +1,9 @@
 # Rebuild and publish every historical version of this harness.
 #
 # Versions are git tags (`harness-release-*`, created automatically by build.yml) plus the current `main`.
-# Each is (re)built and published through Bowtie's reusable `harness-ci.yml` workflow.
-# Run this manually to backfill images, e.g. right after extracting a harness that had a `matrix-versions.json`.
+# Each is (re)built and published through Bowtie's reusable `harness-ci.yml` workflow, pinning the
+# implementation version via the `IMPLEMENTATION_VERSION` build arg.
+# Run this manually to backfill images.
 name: Build All Versions
 
 on:
@@ -26,12 +27,16 @@ jobs:
       - name: Collect available versions
         id: revisions
         run: |
-          # Only the auto-created per-version release tags, plus current `main`.
-          tags=$(jq -c -n '$ARGS.positional + ["main"]' --args $(git tag --list 'harness-release-*'))
-          echo "value=${tags}" >> "$GITHUB_OUTPUT"
+          # Each historical version is a {ref, version} pair: the tag to check out and the
+          # version to pin via the `IMPLEMENTATION_VERSION` build arg.
+          # `main` builds the current default (unpinned) and is additionally tagged `latest`.
+          revisions=$(git tag --list 'harness-release-*' \
+            | jq -R -c '{ref: ., version: ltrimstr("harness-release-")}' \
+            | jq -s -c '. + [{ref: "main", version: ""}]')
+          echo "value=${revisions}" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build
+    name: Build (${{ matrix.revision.ref }})
     needs: versions
     strategy:
       # Backfill as many versions as possible; don't abort the rest on one failure.
@@ -46,6 +51,8 @@ jobs:
       artifact-metadata: write # needed for build provenance attestation
     uses: bowtie-json-schema/bowtie/.github/workflows/harness-ci.yml@a0ae283dca0a0d0eb2381a886d5499162f33c82a # main
     with:
-      ref: ${{ matrix.revision }}
+      ref: ${{ matrix.revision.ref }}
+      build-args: ${{ matrix.revision.version != '' && format('IMPLEMENTATION_VERSION={0}', matrix.revision.version) || '' }}
       publish: true
-      is-latest: ${{ matrix.revision == 'main' }}
+      is-latest: ${{ matrix.revision.ref == 'main' }}
+      smoke-continue-on-error: true

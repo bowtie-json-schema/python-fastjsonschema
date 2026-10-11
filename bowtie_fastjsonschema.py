@@ -56,8 +56,14 @@ class Runner:
         assert self._started, "Not started!"
         return dict(ok=False)
 
-    def cmd_run(self, case, seq):
+    def cmd_run(self, case, seq, output="flag"):
         assert self._started, "Not started!"
+        if output != "flag":
+            return dict(
+                seq=seq,
+                skipped=True,
+                message=f"fastjsonschema doesn't support {output} output",
+            )
         schema = case["schema"]
         try:
             # The registry parameter isn't used here when building cases.

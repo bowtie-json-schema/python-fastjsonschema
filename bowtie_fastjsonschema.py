@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from dataclasses import dataclass
 from importlib import metadata
+from pathlib import Path
 import io
 import json
 import platform
@@ -10,9 +11,21 @@ import traceback
 import fastjsonschema
 
 
+# fastjsonschema doesn't know the metaschemas of the dialects it supports.
+# These are copied from the jsonschema-specifications package.
+METASCHEMAS = {
+    f"http://json-schema.org/draft-0{version}/schema": json.loads(
+        (Path(__file__).parent / "metaschemas" / f"draft{version}.json").read_text(),
+    )
+    for version in (4, 6, 7)
+}
+
+
 class Handlers(dict):
     """
     A handler for every URI scheme, retrieving schemas from a registry.
+
+    The metaschemas of the supported dialects are always available.
     """
 
     def __init__(self, registry):
@@ -29,6 +42,8 @@ class Handlers(dict):
         try:
             return self._registry[uri]
         except KeyError:
+            if uri in METASCHEMAS:
+                return METASCHEMAS[uri]
             raise fastjsonschema.JsonSchemaDefinitionException(
                 f"{uri} is not in the registry",
             ) from None

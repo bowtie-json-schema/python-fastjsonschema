@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from dataclasses import dataclass
 from importlib import metadata
+from pathlib import Path
 import io
 import json
 import platform
@@ -8,6 +9,44 @@ import sys
 import traceback
 
 import fastjsonschema
+
+
+# fastjsonschema doesn't know the metaschemas of the dialects it supports.
+# These are copied from the jsonschema-specifications package.
+METASCHEMAS = {
+    f"http://json-schema.org/draft-0{version}/schema": json.loads(
+        (Path(__file__).parent / "metaschemas" / f"draft{version}.json").read_text(),
+    )
+    for version in (4, 6, 7)
+}
+
+
+class Handlers(dict):
+    """
+    A handler for every URI scheme, retrieving schemas from a registry.
+
+    The metaschemas of the supported dialects are always available.
+    """
+
+    def __init__(self, registry):
+        super().__init__()
+        self._registry = registry
+
+    def __contains__(self, scheme):
+        return True
+
+    def __getitem__(self, scheme):
+        return self._retrieve
+
+    def _retrieve(self, uri):
+        try:
+            return self._registry[uri]
+        except KeyError:
+            if uri in METASCHEMAS:
+                return METASCHEMAS[uri]
+            raise fastjsonschema.JsonSchemaDefinitionException(
+                f"{uri} is not in the registry",
+            ) from None
 
 
 @dataclass
@@ -66,12 +105,12 @@ class Runner:
             )
         schema = case["schema"]
         try:
-            # The registry parameter isn't used here when building cases.
-            # Unless I'm missing it, it doesn't seem there's a way to register
-            # schemas with fastjsonschema. It seems to use RefResolver-like
-            # objects, but they're not exposed to end-user APIs like compile.
-
-            validate = fastjsonschema.compile(schema)
+            # fastjsonschema fetches remote references with a handler for
+            # each URI scheme, falling back to urllib for any scheme without
+            # one. Retrieve them from the case's registry instead, and never
+            # from the network.
+            handlers = Handlers(case.get("registry", {}))
+            validate = fastjsonschema.compile(schema, handlers=handlers)
 
             results = []
 
